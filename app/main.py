@@ -1,7 +1,8 @@
+import os
+import uvicorn
 from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import select
-from app.models.seat_quota import SeatQuota
 from app.services.seat_service import SeatService
 from app.core.config import settings
 from app.services.reservation_service import ReservationService
@@ -117,3 +118,7 @@ def update_seats(
 from app.routes.reservation_routes import router as reservation_router
 
 app.include_router(reservation_router)
+
+if __name__ =="__main__":
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host ="0.0.0.0", port = port)
