@@ -1,23 +1,52 @@
-from pydantic import BaseModel, EmailStr
-from pydantic import BaseModel
+"""
+Pydantic schemas for user and authentication endpoints.
 
-from app.models.user import Role
+UserCreate   – body for POST /auth/users  (ops manager creates a staff account)
+UserLogin    – body for POST /auth/login
+TokenOut     – response from POST /auth/login
+UserResponse – response model for user data (never returns the hashed password)
+"""
+
+from datetime import datetime
+
+from pydantic import BaseModel, EmailStr, Field
+
+from app.core.roles import UserRole
 
 
 class UserCreate(BaseModel):
-    email: EmailStr
+    """Request body to create a new staff account."""
+
+    username:  str      = Field(..., min_length=3, max_length=64)
+    email:     EmailStr
+    full_name: str      = Field(..., min_length=1, max_length=128)
+    password:  str      = Field(..., min_length=8)
+    role:      UserRole = UserRole.SHIFT_MANAGER
+
+
+class UserLogin(BaseModel):
+    """Request body for the login endpoint."""
+
+    username: str
     password: str
-    role: Role = Role.GUEST
+
+
+class TokenOut(BaseModel):
+    """JWT response returned after successful login."""
+
+    access_token: str
+    token_type:   str = "bearer"
 
 
 class UserResponse(BaseModel):
-    id: int
-    email: EmailStr
-    role: Role
+    """Safe user representation – never exposes the hashed password."""
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
-class UserLogin(BaseModel):
-        email: EmailStr
-        password: str
+    id:         int
+    username:   str
+    email:      EmailStr
+    full_name:  str
+    role:       UserRole
+    is_active:  bool
+    created_at: datetime

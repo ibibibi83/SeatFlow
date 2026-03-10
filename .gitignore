@@ -1,6 +1,6 @@
-.venv/
 __pycache__/
 *.pyc
-seatflow.db
+*.db
 .env
-.idea/
+.venv/
+venv/

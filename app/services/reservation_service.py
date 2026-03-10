@@ -1,61 +1,209 @@
+"""
+Reservation service.
+
+Handles the full reservation lifecycle:
+  create  – validate seat availability, generate confirmation code, persist
+  check_in – transition to CHECKED_IN and fire the pre-order
+  cancel  – mark as CANCELLED and release seats
+  expire  – batch-expire stale PENDING reservations (called by scheduler)
+"""
+
+import logging
+import secrets
+import string
+from datetime import datetime, timezone
+
+from sqlalchemy import func
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func
-from datetime import datetime, timedelta
 
+from app.core.config import settings
+from app.core.exceptions import (
+    InsufficientSeatsException,
+    NotFoundException,
+    ReservationAlreadyCheckedInException,
+    ReservationExpiredException,
+)
 from app.models.reservation import Reservation, ReservationStatus
-from app.models.seat_quota import SeatQuota
-from fastapi import HTTPException, status
-from app.services.seat_service import SeatService
+from app.schemas.reservation_schema import ReservationCreate, ReservationResponse
+
+logger = logging.getLogger(__name__)
+
+# Characters used for confirmation codes – easy to read, no ambiguous chars
+_CODE_CHARS = string.ascii_uppercase + string.digits
+
+
+def _generate_code(length: int = 10) -> str:
+    """Return a cryptographically random alphanumeric confirmation code."""
+    return "".join(secrets.choice(_CODE_CHARS) for _ in range(length))
+
+
 class ReservationService:
+    def __init__(self, db: Session) -> None:
+        self._db = db
 
-    @staticmethod
-    def calculate_reserved_seats(db: Session) -> int:
-        stmt = select(func.sum(Reservation.seats_reserved)).where(
-            Reservation.status == ReservationStatus.ACTIVE.value,
-            Reservation.expires_at > datetime.utcnow()
+    # ── Internal helpers ──────────────────────────────────────────────────────
+
+    def _count_reserved_seats(self) -> int:
+        """Sum of seats held by currently PENDING reservations."""
+        result = (
+            self._db.query(func.sum(Reservation.seats_reserved))
+            .filter(
+                Reservation.status == ReservationStatus.PENDING,
+                Reservation.expires_at > datetime.now(tz=timezone.utc),
+            )
+            .scalar()
         )
-
-        result = db.execute(stmt).scalar()
         return result or 0
 
-    @staticmethod
-    def calculate_available_seats(db: Session) -> int:
-        # Gesamtplätze holen
-        quota = SeatService.get_quota(db)
+    def _get_reservation_or_404(self, reservation_id: int) -> Reservation:
+        r = self._db.query(Reservation).filter(Reservation.id == reservation_id).first()
+        if r is None:
+            raise NotFoundException("Reservation", reservation_id)
+        return r
 
+    def _get_by_code_or_404(self, code: str) -> Reservation:
+        r = self._db.query(Reservation).filter(Reservation.confirmation_code == code).first()
+        if r is None:
+            raise NotFoundException("Reservation", code)
+        return r
 
-        if not quota:
-            return 0
+    # ── Public API ────────────────────────────────────────────────────────────
 
-        reserved = ReservationService.calculate_reserved_seats(db)
+    def get_availability(self, reservable_seats: int) -> dict:
+        """
+        Return a snapshot of current seat availability.
 
-        return quota.total_seats - reserved
+        Args:
+            reservable_seats: from SeatService.get_reservable_seats()
+        """
+        reserved  = self._count_reserved_seats()
+        available = max(0, reservable_seats - reserved)
+        return {"reservable_seats": reservable_seats, "reserved_seats": reserved, "available_seats": available}
 
-    @staticmethod
-    def create_reservation(db: Session, user_id: int, seats: int):
+    def create_reservation(self, payload: ReservationCreate, reservable_seats: int) -> ReservationResponse:
+        """
+        Create a new PENDING reservation.
 
-        # 1️ Verfügbare Plätze berechnen
-        available = ReservationService.calculate_available_seats(db)
-        print(available)
-        if seats > available:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Not enough available seats"
+        Raises:
+            InsufficientSeatsException: if not enough seats are available.
+        """
+        reserved  = self._count_reserved_seats()
+        available = max(0, reservable_seats - reserved)
+
+        if payload.seats_reserved > available:
+            raise InsufficientSeatsException(payload.seats_reserved, available)
+
+        expires_at = datetime.now(tz=timezone.utc) + \
+            __import__("datetime").timedelta(minutes=settings.RESERVATION_DURATION_MINUTES)
+
+        # Retry loop in the unlikely event of a code collision
+        for _ in range(5):
+            code = _generate_code()
+            if not self._db.query(Reservation).filter(Reservation.confirmation_code == code).first():
+                break
+
+        reservation = Reservation(
+            confirmation_code=code,
+            guest_name=payload.guest_name,
+            guest_contact=payload.guest_contact,
+            seats_reserved=payload.seats_reserved,
+            expires_at=expires_at,
+            notes=payload.notes,
+        )
+        self._db.add(reservation)
+        self._db.commit()
+        self._db.refresh(reservation)
+
+        logger.info(
+            "Reservation created: code=%s seats=%d expires=%s",
+            code, payload.seats_reserved, expires_at.isoformat(),
+        )
+        return ReservationResponse.model_validate(reservation)
+
+    def check_in(self, confirmation_code: str) -> Reservation:
+        """
+        Mark a reservation as CHECKED_IN.
+
+        Raises:
+            NotFoundException:                  if no reservation matches the code.
+            ReservationExpiredException:        if the reservation has expired.
+            ReservationAlreadyCheckedInException: if already checked in.
+        """
+        reservation = self._get_by_code_or_404(confirmation_code)
+
+        if reservation.status == ReservationStatus.EXPIRED:
+            raise ReservationExpiredException(reservation.id)
+        if reservation.status == ReservationStatus.CHECKED_IN:
+            raise ReservationAlreadyCheckedInException(reservation.id)
+        if reservation.status == ReservationStatus.CANCELLED:
+            raise NotFoundException("Active reservation", confirmation_code)
+
+        # Treat as expired if the window has passed (scheduler may not have run yet)
+        if reservation.expires_at < datetime.now(tz=timezone.utc):
+            reservation.status = ReservationStatus.EXPIRED
+            self._db.commit()
+            raise ReservationExpiredException(reservation.id)
+
+        reservation.status        = ReservationStatus.CHECKED_IN
+        reservation.checked_in_at = datetime.now(tz=timezone.utc)
+        self._db.commit()
+        self._db.refresh(reservation)
+
+        logger.info("Reservation %d checked in (code=%s).", reservation.id, confirmation_code)
+        return reservation
+
+    def cancel_reservation(self, reservation_id: int) -> ReservationResponse:
+        """
+        Cancel a PENDING reservation, releasing its seats immediately.
+
+        Raises:
+            NotFoundException:   if reservation does not exist.
+            ConflictException:   if reservation is not in a cancellable state.
+        """
+        from app.core.exceptions import ConflictException
+        reservation = self._get_reservation_or_404(reservation_id)
+
+        if reservation.status not in (ReservationStatus.PENDING,):
+            raise ConflictException(
+                f"Cannot cancel a reservation with status '{reservation.status}'."
             )
 
-        # 2️ Ablaufzeit setzen (15 Minuten)
-        expires_at = datetime.utcnow() + timedelta(minutes=15)
+        reservation.status       = ReservationStatus.CANCELLED
+        reservation.cancelled_at = datetime.now(tz=timezone.utc)
+        self._db.commit()
+        self._db.refresh(reservation)
 
-        # 3️ Reservierung erstellen
-        reservation = Reservation(
-            user_id=user_id,
-            seats_reserved=seats,
-            status=ReservationStatus.ACTIVE,
-            expires_at=expires_at
+        logger.info("Reservation %d cancelled.", reservation_id)
+        return ReservationResponse.model_validate(reservation)
+
+    def list_all(self) -> list[ReservationResponse]:
+        """Return all reservations ordered by creation time (management only)."""
+        rows = (
+            self._db.query(Reservation)
+            .order_by(Reservation.reserved_at.desc())
+            .all()
         )
+        return [ReservationResponse.model_validate(r) for r in rows]
 
-        db.add(reservation)
-        db.commit()
-        db.refresh(reservation)
+    def expire_stale_reservations(self) -> int:
+        """
+        Batch-expire PENDING reservations whose time window has elapsed.
 
-        return reservation
+        Called periodically by the background scheduler.
+        Returns the number of reservations that were expired.
+        """
+        now = datetime.now(tz=timezone.utc)
+        stale = (
+            self._db.query(Reservation)
+            .filter(
+                Reservation.status == ReservationStatus.PENDING,
+                Reservation.expires_at <= now,
+            )
+            .all()
+        )
+        for r in stale:
+            r.status = ReservationStatus.EXPIRED
+
+        if stale:
+            self._db.commit()
+        return len(stale)

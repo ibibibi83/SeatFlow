@@ -1,124 +1,109 @@
-import os
-import uvicorn
-from fastapi import FastAPI, Depends
-from sqlalchemy.orm import Session
-from sqlalchemy import select
-from app.services.seat_service import SeatService
-from app.core.config import settings
-from app.services.reservation_service import ReservationService
-from app.db.base import Base
-from app.db.session import engine, get_db
-from app.models.user import User
-from app.services.user_service import UserService
-from app.schemas.user_schema import UserCreate, UserResponse, UserLogin
-from app.core.security import (
-    verify_password,
-    create_access_token,
-    get_current_user,
-    require_role,
+"""
+SeatFlow API – application entry point.
 
+Starts the FastAPI application, registers all routers under /api/v1,
+attaches a global exception handler, and manages the lifespan of the
+database (via init_db) and the background scheduler.
+"""
+
+import logging
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from app.core.config import settings
+from app.core.exceptions import AppException
+from app.core.scheduler import start_scheduler, stop_scheduler
+from app.db.init_db import init_db
+
+# ── Routers ───────────────────────────────────────────────────────────────────
+from app.routes.auth_router import router as auth_router
+from app.routes.menu_router import router as menu_router
+from app.routes.order_router import router as order_router
+from app.routes.reservation_routes import router as reservation_router
+from app.routes.restauran_router import router as seats_router
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
 )
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """
+    FastAPI lifespan hook.
+
+    Code before 'yield' runs on startup; code after 'yield' runs on shutdown.
+    - init_db  : creates tables and inserts seed data if the database is empty.
+    - scheduler: runs the reservation-expiry sweep every 60 seconds.
+    """
+    logger.info("SeatFlow API starting up...")
+    init_db()
+    start_scheduler()
+    yield
+    stop_scheduler()
+    logger.info("SeatFlow API shut down cleanly.")
+
+
+# ── Application instance ──────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="SeatFlow API",
-    version="1.0.0"
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    description=(
+        "Restaurant reservation and order management system for Blockbräu Hamburg.\n\n"
+        "**Public endpoints** require no authentication.\n"
+        "**Management endpoints** require a Bearer token with a staff role.\n\n"
+        "Default credentials:\n"
+        "- `ops_manager` / `ops123`\n"
+        "- `shift_manager` / `shift123`"
+    ),
+    docs_url="/docs",
+    redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
-Base.metadata.create_all(bind=engine)
+# ── Middleware ────────────────────────────────────────────────────────────────
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],       # restrict in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.get("/")
-def root():
-    return {
-        "message": "SeatFlow API is running",
-        "database_url": settings.DATABASE_URL
-    }
+# ── Global exception handler ──────────────────────────────────────────────────
 
-
-@app.post("/users", response_model=UserResponse)
-def create_user(
-    user_data: UserCreate,
-    db: Session = Depends(get_db)
-):
-    print (user_data)
-    user = UserService.create_user(
-        db=db,
-        email=user_data.email,
-        password=user_data.password,
-        role=user_data.role
+@app.exception_handler(AppException)
+async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
+    """
+    Convert any AppException (and its subclasses) to a consistent JSON error response.
+    This means route handlers never need to manually raise HTTPException.
+    """
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.message},
     )
 
-    db.commit()
-    db.refresh(user)
+# ── Routers ───────────────────────────────────────────────────────────────────
 
-    return user
+API_PREFIX = "/api/v1"
 
+app.include_router(auth_router,        prefix=API_PREFIX)   # /api/v1/auth/...
+app.include_router(seats_router,       prefix=API_PREFIX)   # /api/v1/seats/...
+app.include_router(reservation_router, prefix=API_PREFIX)   # /api/v1/reservations/...
+app.include_router(menu_router,        prefix=API_PREFIX)   # /api/v1/menu/...
+app.include_router(order_router,       prefix=API_PREFIX)   # /api/v1/orders/...
 
-@app.post("/login")
-def login(
-    user_data: UserLogin,
-    db: Session = Depends(get_db)
-):
-    stmt = select(User).where(User.email == user_data.email)
-    result = db.execute(stmt)
-    user = result.scalar_one_or_none()
+# ── Health check ──────────────────────────────────────────────────────────────
 
-    if not user or not verify_password(user_data.password, user.password_hash):
-        return {"error": "Invalid credentials"}
-
-    access_token = create_access_token(
-        data={"sub": str(user.id), "role": user.role.value}
-    )
-
-    return {
-        "access_token": access_token,
-        "token_type": "bearer"
-    }
-
-
-@app.get("/admin-only")
-def admin_area(current_user: User = Depends(require_role("manager"))):
-    return {"message": "Welcome Manager"}
-
-@app.get("/me")
-def read_current_user(current_user: User = Depends(get_current_user)):
-    return {
-        "id": current_user.id,
-        "email": current_user.email,
-        "role": current_user.role
-    }
-
-@app.get("/seats")
-def get_seats(db: Session = Depends(get_db)):
-    quota = SeatService.get_quota(db)
-
-    if not quota:
-        quota = SeatService.create_initial_quota(db)
-
-    reserved = ReservationService.calculate_reserved_seats(db)
-    available = ReservationService.calculate_available_seats(db)
-
-    return {
-        "total_seats": quota.total_seats,
-        "reserved_seats": reserved,
-        "available_seats": available
-    }
-@app.patch("/seats")
-def update_seats(
-    total_seats: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("manager"))
-):
-    quota = SeatService.update_quota(db, total_seats)
-
-    return {
-        "message": "Seat quota updated",
-        "total_seats": quota.total_seats
-    }
-from app.routes.reservation_routes import router as reservation_router
-
-app.include_router(reservation_router)
-
-if __name__ =="__main__":
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host ="0.0.0.0", port = port)
+@app.get("/health", tags=["System"], summary="Health check")
+def health() -> dict:
+    """Returns HTTP 200 if the server is running. Used by load balancers."""
+    return {"status": "ok", "version": settings.APP_VERSION}
