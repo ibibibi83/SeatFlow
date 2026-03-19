@@ -206,10 +206,14 @@ class OrderService:
         ]
 
         total = round(sum(float(i.unit_price) * i.quantity for i in order_items), 2)
+        if reservation.status == ReservationStatus.CHECKED_IN:
+            order_status = OrderStatus.FIRED
 
+        else:
+            order_status = OrderStatus.PENDING_CHECKIN
         order = Order(
             reservation_id=reservation_id,
-            status=OrderStatus.PENDING_CHECKIN,
+            status= order_status,
             total_amount=total,
             special_requests=payload.special_requests,
             items=order_items,

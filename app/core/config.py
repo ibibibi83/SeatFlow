@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     # ── Seat management ───────────────────────────────────────────────────────
     TOTAL_SEATS: int = 230          # physical seats in the venue
-    RESERVABLE_SEATS: int = 50      # maximum seats that can be reserved at once
+    RESERVABLE_SEATS: int = 100    # maximum seats that can be reserved at once
     RESERVATION_DURATION_MINUTES: int = 15  # how long a reservation stays active
 
 

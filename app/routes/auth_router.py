@@ -1,9 +1,10 @@
 """
 Authentication routes.
 
-POST /auth/login   – exchange credentials for a JWT access token
-POST /auth/users   – create a new staff account (operations manager only)
-GET  /auth/me      – return the currently authenticated user's profile
+POST /auth/register – guest self-registration (public)
+POST /auth/login    – exchange credentials for a JWT access token
+POST /auth/users    – create a new staff account (operations manager only)
+GET  /auth/me       – return the currently authenticated user's profile
 """
 
 from typing import Annotated
@@ -13,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import CurrentUser, OperationsManagerUser
 from app.db.session import get_db
-from app.schemas.user_schema import TokenOut, UserCreate, UserLogin, UserResponse
+from app.schemas.user_schema import TokenOut, UserCreate, UserLogin, UserRegister, UserResponse
 from app.services.user_service import UserService
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -27,6 +28,20 @@ UserServiceDep = Annotated[UserService, Depends(_get_user_service)]
 
 
 @router.post(
+    "/register",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Guest self-registration (public)",
+)
+def register(payload: UserRegister, service: UserServiceDep) -> UserResponse:
+    """
+    Any guest can create their own account.
+    The role is automatically set to GUEST – no staff privileges.
+    """
+    return service.register_guest(payload)
+
+
+@router.post(
     "/login",
     response_model=TokenOut,
     summary="Log in and receive a JWT access token",
@@ -34,8 +49,7 @@ UserServiceDep = Annotated[UserService, Depends(_get_user_service)]
 def login(payload: UserLogin, service: UserServiceDep) -> TokenOut:
     """
     Validate username and password.
-    Returns a Bearer token that must be included in the Authorization header
-    for all protected endpoints.
+    Returns a Bearer token for all protected endpoints.
     """
     return service.login(payload)
 
@@ -47,14 +61,11 @@ def login(payload: UserLogin, service: UserServiceDep) -> TokenOut:
     summary="Create a new staff account (operations manager only)",
 )
 def create_user(
-    payload:  UserCreate,
-    service:  UserServiceDep,
-    _:        OperationsManagerUser,   # enforces role check
+    payload: UserCreate,
+    service: UserServiceDep,
+    _:       OperationsManagerUser,
 ) -> UserResponse:
-    """
-    Only an operations manager can create new accounts.
-    The new account can be assigned the shift_manager or operations_manager role.
-    """
+    """Only an operations manager can create new staff accounts."""
     return service.create_user(payload)
 
 

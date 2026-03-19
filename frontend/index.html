@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0a0a0a" />
+  <meta name="description" content="SeatFlow – Tischreservierung für Blockbräu Hamburg" />
+  <link rel="manifest" href="manifest.json" />
+  <title>SeatFlow — Blockbräu Hamburg</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="noise"></div>
+
+  <!-- ── HEADER ────────────────────────────────────────────────────── -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-mark">SF</span>
+        <span class="logo-text">SeatFlow</span>
+      </div>
+      <nav class="header-nav">
+        <span class="nav-location">📍 Blockbräu Hamburg</span>
+        <button class="admin-btn" id="adminBtn" title="Admin">⬡</button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- ── MAIN ──────────────────────────────────────────────────────── -->
+  <main class="main">
+
+    <!-- HERO -->
+    <section class="hero">
+      <p class="hero-eyebrow">Echtzeit-Verfügbarkeit</p>
+      <h1 class="hero-title">Reserviere<br/><em>deinen Platz.</em></h1>
+      <p class="hero-sub">Melde dich an und reserviere deinen Tisch in Sekunden.</p>
+    </section>
+
+    <!-- AVAILABILITY CARD -->
+    <section class="availability-card" id="availabilityCard">
+      <div class="avail-header">
+        <span class="avail-label">Verfügbare Plätze</span>
+        <button class="refresh-btn" id="refreshBtn" title="Aktualisieren">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 4v6h-6M1 20v-6h6"/>
+            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+          </svg>
+        </button>
+      </div>
+      <div class="avail-number-wrap">
+        <span class="avail-number" id="availableSeats">—</span>
+        <span class="avail-total" id="totalSeats">/ —</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progressFill" style="width:0%"></div>
+        <div class="progress-glow" id="progressGlow" style="width:0%"></div>
+      </div>
+      <div class="avail-meta">
+        <span class="avail-status" id="availStatus">Wird geladen...</span>
+        <span class="avail-live"><span class="live-dot"></span> Live</span>
+      </div>
+    </section>
+
+    <!-- AUTH SECTION (nicht eingeloggt) -->
+    <section class="auth-section" id="authSection">
+      <div class="auth-card">
+        <div class="auth-icon">🔐</div>
+        <p class="auth-title">Anmelden zum Reservieren</p>
+        <p class="auth-sub">Erstelle ein kostenloses Konto oder melde dich an.</p>
+        <button class="submit-btn" id="openAuthBtn" onclick="openModal(document.getElementById('authModal'))">
+          <span class="submit-text">Anmelden / Registrieren</span>
+          <span class="submit-arrow">→</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- LOGGED IN BAR -->
+    <div class="logged-in-bar" id="loggedInBar" style="display:none">
+      <span class="logged-in-text">👋 Hallo, <strong id="loggedInName"></strong></span>
+      <button class="logout-btn" id="logoutBtn">Ausloggen</button>
+    </div>
+
+    <!-- MEINE RESERVIERUNGEN -->
+    <section class="my-reservations-section" id="myReservationsSection" style="display:none">
+      <div class="my-res-header">
+        <h2 class="form-title">Meine Reservierungen</h2>
+        <button class="refresh-btn" id="myResBtn" title="Aktualisieren">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 4v6h-6M1 20v-6h6"/>
+            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+          </svg>
+        </button>
+      </div>
+      <div class="my-reservations-list" id="myReservationsList"></div>
+    </section>
+
+    <!-- RESERVATION FORM -->
+    <section class="form-section" id="formSection" style="display:none">
+      <h2 class="form-title">Tisch reservieren</h2>
+      <form class="reservation-form" id="reservationForm" novalidate>
+
+        <div class="field-group">
+          <label class="field-label" for="guestName">Dein Name</label>
+          <input class="field-input" type="text" id="guestName"
+            placeholder="Maria Schmidt" autocomplete="name" required />
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="guestContact">Telefon oder E-Mail</label>
+          <input class="field-input" type="text" id="guestContact"
+            placeholder="+49 40 123 456" autocomplete="tel" required />
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">Anzahl Personen</label>
+          <div class="seat-picker">
+            <button type="button" class="seat-btn" id="seatMinus">−</button>
+            <span class="seat-count" id="seatCount">2</span>
+            <button type="button" class="seat-btn" id="seatPlus">+</button>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="notes">Anmerkung <span class="optional">(optional)</span></label>
+          <input class="field-input" type="text" id="notes"
+            placeholder="Fenstertisch bevorzugt..." />
+        </div>
+
+        <!-- ── NEU: Ankunftszeit ── -->
+        <div class="field-group">
+          <label class="field-label" for="reservationDatetime">
+            Ankunftszeit <span class="optional">(optional – leer = sofort)</span>
+          </label>
+          <input class="field-input" type="datetime-local" id="reservationDatetime" />
+        </div>
+
+        <button type="submit" class="submit-btn" id="submitBtn">
+          <span class="submit-text">Platz reservieren</span>
+          <span class="submit-arrow">→</span>
+        </button>
+
+      </form>
+    </section>
+
+    <!-- MENU & ORDER SECTION -->
+    <section class="menu-section" id="menuSection" style="display:none">
+      <div class="menu-header">
+        <h2 class="form-title">Vorbestellung</h2>
+        <p class="menu-sub">Bestelle jetzt – dein Essen ist bereit wenn du ankommst.</p>
+      </div>
+      <div class="menu-categories" id="menuCategories"></div>
+      <div class="cart-wrap" id="cartWrap" style="display:none">
+        <div class="cart-header">
+          <span class="cart-label">Bestellung</span>
+          <span class="cart-count" id="cartCount">0 Artikel</span>
+        </div>
+        <div class="cart-items" id="cartItems"></div>
+        <div class="cart-total-row">
+          <span class="cart-total-label">Gesamt</span>
+          <span class="cart-total" id="cartTotal">0,00 €</span>
+        </div>
+        <button class="submit-btn" id="orderSubmitBtn">
+          <span class="submit-text">Vorbestellung absenden</span>
+          <span class="submit-arrow">→</span>
+        </button>
+      </div>
+      <div class="order-confirmation" id="orderConfirmation" style="display:none">
+        <div class="order-conf-icon">✓</div>
+        <p class="order-conf-title">Vorbestellung gespeichert</p>
+        <div class="order-conf-items" id="orderConfItems"></div>
+        <button class="order-edit-btn" id="orderEditBtn">Bestellung ändern</button>
+      </div>
+    </section>
+
+    <!-- GAME TEASER -->
+    <section class="game-teaser" id="gameTeaser">
+      <div class="game-teaser-inner">
+        <div class="game-icon">🎮</div>
+        <div class="game-copy">
+          <p class="game-title">Spielen während du wartest</p>
+          <p class="game-sub">Nur in der SeatFlow App verfügbar</p>
+        </div>
+        <button class="game-btn" id="gameBtn">Starten</button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ── AUTH MODAL ────────────────────────────────────────────────── -->
+  <div class="modal-overlay" id="authModal">
+    <div class="modal auth-modal">
+      <button class="modal-x" onclick="closeModal(document.getElementById('authModal'))">✕</button>
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tabLogin">Anmelden</button>
+        <button class="auth-tab" id="tabRegister">Registrieren</button>
+      </div>
+      <div class="auth-form-wrap" id="loginForm" style="display:flex; flex-direction:column; gap:14px">
+        <input class="field-input" type="text"     id="loginUser" placeholder="Benutzername" />
+        <input class="field-input" type="password" id="loginPass" placeholder="Passwort" />
+        <button class="submit-btn" id="loginBtn">
+          <span class="submit-text">Anmelden</span>
+          <span class="submit-arrow">→</span>
+        </button>
+        <div class="auth-status" id="loginStatus"></div>
+      </div>
+      <div class="auth-form-wrap" id="registerForm" style="display:none; flex-direction:column; gap:14px">
+        <input class="field-input" type="text"     id="regFullName" placeholder="Vollständiger Name" />
+        <input class="field-input" type="text"     id="regUsername"  placeholder="Benutzername" />
+        <input class="field-input" type="email"    id="regEmail"     placeholder="E-Mail" />
+        <input class="field-input" type="password" id="regPass"      placeholder="Passwort (min. 8 Zeichen)" />
+        <button class="submit-btn" id="registerBtn">
+          <span class="submit-text">Konto erstellen</span>
+          <span class="submit-arrow">→</span>
+        </button>
+        <div class="auth-status" id="registerStatus"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SUCCESS MODAL ─────────────────────────────────────────────── -->
+  <div class="modal-overlay" id="successModal">
+    <div class="modal">
+      <div class="modal-icon success-icon">✓</div>
+      <h2 class="modal-title">Reserviert!</h2>
+      <p class="modal-sub">Dein Bestätigungscode:</p>
+      <div class="code-display" id="confirmationCode">——————</div>
+      <p class="modal-hint">Zeige diesen Code beim Einchecken vor. Dein Platz ist für <strong>15 Minuten</strong> reserviert.</p>
+      <div class="countdown-wrap">
+        <svg class="countdown-ring" viewBox="0 0 100 100">
+          <circle class="ring-bg" cx="50" cy="50" r="44"/>
+          <circle class="ring-progress" id="ringProgress" cx="50" cy="50" r="44"/>
+        </svg>
+        <div class="countdown-center">
+          <span class="countdown-time" id="countdownTime">15:00</span>
+          <span class="countdown-label">verbleibend</span>
+        </div>
+      </div>
+      <button class="modal-close" id="modalClose">Schließen</button>
+    </div>
+  </div>
+
+  <!-- ── GAME MODAL ────────────────────────────────────────────────── -->
+  <div class="modal-overlay" id="gameModal">
+    <div class="modal game-modal">
+      <button class="modal-x" id="gameModalClose">✕</button>
+      <h2 class="modal-title">SeatFlow Game</h2>
+      <p class="modal-sub">Demo — kommt in der App</p>
+      <canvas id="gameCanvas" width="300" height="200"></canvas>
+      <p class="game-coming">🚀 Das vollständige Spiel ist in der<br/>SeatFlow Mobile App verfügbar.</p>
+      <div class="app-badges">
+        <span class="app-badge">App Store</span>
+        <span class="app-badge">Google Play</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ADMIN MODAL ───────────────────────────────────────────────── -->
+  <div class="modal-overlay" id="adminModal">
+    <div class="modal admin-modal">
+      <button class="modal-x" id="adminModalClose">✕</button>
+      <h2 class="modal-title">Admin Panel</h2>
+      <div class="admin-form">
+        <input class="field-input" type="text"     id="adminUser" placeholder="Benutzername" />
+        <input class="field-input" type="password" id="adminPass" placeholder="Passwort" />
+        <button class="submit-btn" id="adminLoginBtn">
+          <span class="submit-text">Einloggen</span>
+          <span class="submit-arrow">→</span>
+        </button>
+        <button class="submit-btn" style="background:var(--green);margin-top:8px" onclick="openCheckIn()">
+          <span class="submit-text">Gast einchecken</span>
+          <span class="submit-arrow">→</span>
+        </button>
+      </div>
+      <div class="admin-status" id="adminStatus"></div>
+    </div>
+  </div>
+
+  <!-- ── CHECK-IN MODAL ────────────────────────────────────────────── -->
+  <div class="modal-overlay" id="checkInModal">
+    <div class="modal">
+      <button class="modal-x" id="checkInModalClose">✕</button>
+      <h2 class="modal-title">Check-in</h2>
+      <p class="modal-sub">Bestätigungscode eingeben</p>
+      <div class="field-group" style="margin-bottom:16px">
+        <input class="field-input" type="text" id="checkInInput"
+          placeholder="z.B. ZKD7PXPIEQ"
+          style="text-transform:uppercase; letter-spacing:0.1em; font-family:var(--font-mono); font-size:18px; text-align:center"
+          maxlength="16" />
+      </div>
+      <button class="submit-btn" id="checkInBtn">
+        <span class="submit-text">Einchecken</span>
+        <span class="submit-arrow">→</span>
+      </button>
+      <div class="auth-status" id="checkInStatus" style="margin-top:12px"></div>
+    </div>
+  </div>
+
+  <!-- ── TOAST ─────────────────────────────────────────────────────── -->
+  <div class="toast" id="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

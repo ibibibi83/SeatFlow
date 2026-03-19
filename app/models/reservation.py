@@ -47,10 +47,12 @@ class Reservation(Base):
     expires_at:    Mapped[datetime]      = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     checked_in_at: Mapped[datetime|None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_at:  Mapped[datetime|None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reservation_datetime: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reservation_datetime: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes:         Mapped[str|None]      = mapped_column(String(512), nullable=True)
 
     # Optional link to a staff member who created the reservation on behalf of a guest
-    user_id: Mapped[int|None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    guest_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
 
     user:  Mapped["User|None"]  = relationship("User", back_populates="reservations")   # noqa: F821
     order: Mapped["Order|None"] = relationship("Order", back_populates="reservation", uselist=False)  # noqa: F821

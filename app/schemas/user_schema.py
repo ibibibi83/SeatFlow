@@ -1,10 +1,11 @@
 """
 Pydantic schemas for user and authentication endpoints.
 
-UserCreate   – body for POST /auth/users  (ops manager creates a staff account)
-UserLogin    – body for POST /auth/login
-TokenOut     – response from POST /auth/login
-UserResponse – response model for user data (never returns the hashed password)
+UserCreate    – body for POST /auth/users  (ops manager creates a staff account)
+UserRegister  – body for POST /auth/register (guest self-registration)
+UserLogin     – body for POST /auth/login
+TokenOut      – response from POST /auth/login
+UserResponse  – response model for user data (never returns the hashed password)
 """
 
 from datetime import datetime
@@ -22,6 +23,15 @@ class UserCreate(BaseModel):
     full_name: str      = Field(..., min_length=1, max_length=128)
     password:  str      = Field(..., min_length=8)
     role:      UserRole = UserRole.SHIFT_MANAGER
+
+
+class UserRegister(BaseModel):
+    """Request body for guest self-registration."""
+
+    username:  str      = Field(..., min_length=3, max_length=64)
+    email:     EmailStr
+    full_name: str      = Field(..., min_length=1, max_length=128)
+    password:  str      = Field(..., min_length=8)
 
 
 class UserLogin(BaseModel):

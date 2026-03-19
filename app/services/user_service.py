@@ -14,7 +14,7 @@ from app.core.exceptions import ConflictException, InvalidCredentialsException
 from app.core.roles import UserRole
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User
-from app.schemas.user_schema import UserCreate, UserLogin, TokenOut, UserResponse
+from app.schemas.user_schema import UserCreate, UserLogin, UserRegister, TokenOut, UserResponse
 
 logger = logging.getLogger(__name__)
 
@@ -23,18 +23,44 @@ class UserService:
     def __init__(self, db: Session) -> None:
         self._db = db
 
+    def register_guest(self, payload: UserRegister) -> UserResponse:
+        """
+        Self-registration for guests.
+        Role is always set to GUEST – no staff privileges.
+
+        Raises:
+            ConflictException: if the username or email is already taken.
+        """
+        if self._db.query(User).filter(User.username == payload.username).first():
+            raise ConflictException(f"Username '{payload.username}' is already taken.")
+
+        if self._db.query(User).filter(User.email == payload.email).first():
+            raise ConflictException(f"Email '{payload.email}' is already registered.")
+
+        user = User(
+            username=payload.username,
+            email=payload.email,
+            full_name=payload.full_name,
+            hashed_password=hash_password(payload.password),
+            role=UserRole.GUEST,  # always guest, never staff
+            is_active=True,
+        )
+        self._db.add(user)
+        self._db.commit()
+        self._db.refresh(user)
+        logger.info("Guest registered: %s", user.username)
+        return UserResponse.model_validate(user)
+
     def create_user(self, payload: UserCreate) -> UserResponse:
         """
-        Create a new staff account.
+        Create a new staff account (ops manager only).
 
         Raises:
             ConflictException: if the username or email is already registered.
         """
-        # Check for duplicate username
         if self._db.query(User).filter(User.username == payload.username).first():
             raise ConflictException(f"Username '{payload.username}' is already taken.")
 
-        # Check for duplicate email
         if self._db.query(User).filter(User.email == payload.email).first():
             raise ConflictException(f"Email '{payload.email}' is already registered.")
 
@@ -49,7 +75,7 @@ class UserService:
         self._db.add(user)
         self._db.commit()
         self._db.refresh(user)
-        logger.info("User created: %s (%s)", user.username, user.role)
+        logger.info("Staff user created: %s (%s)", user.username, user.role)
         return UserResponse.model_validate(user)
 
     def login(self, payload: UserLogin) -> TokenOut:
